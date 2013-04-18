@@ -134,6 +134,8 @@ class MachineFunction {
   /// True if the function includes MS-style inline assembly.
   bool HasMSInlineAsm;
 
+  const char *PrivateGlobalPrefix;
+
   MachineFunction(const MachineFunction &) LLVM_DELETED_FUNCTION;
   void operator=(const MachineFunction&) LLVM_DELETED_FUNCTION;
 public:
@@ -142,6 +144,7 @@ public:
                   GCModuleInfo* GMI);
   ~MachineFunction();
 
+  const char *getPrivateGlobalPrefix() const { return PrivateGlobalPrefix; }
   MachineModuleInfo &getMMI() const { return MMI; }
   GCModuleInfo *getGMI() const { return GMI; }
   MCContext &getContext() const { return Ctx; }

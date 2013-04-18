@@ -52,7 +52,8 @@ void ilist_traits<MachineBasicBlock>::deleteNode(MachineBasicBlock *MBB) {
 MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                                  unsigned FunctionNum, MachineModuleInfo &mmi,
                                  GCModuleInfo* gmi)
-  : Fn(F), Target(TM), Ctx(mmi.getContext()), MMI(mmi), GMI(gmi) {
+  : Fn(F), Target(TM), Ctx(mmi.getContext()), MMI(mmi), GMI(gmi),
+    PrivateGlobalPrefix(Ctx.getAsmInfo().getPrivateGlobalPrefix()) {
   if (TM.getRegisterInfo())
     RegInfo = new (Allocator) MachineRegisterInfo(*TM.getRegisterInfo());
   else
@@ -73,6 +74,7 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                          TM.getTargetLowering()->getPrefFunctionAlignment());
   FunctionNumber = FunctionNum;
   JumpTableInfo = 0;
+  PrivateGlobalPrefix = Ctx.getAsmInfo().getPrivateGlobalPrefix();
 }
 
 MachineFunction::~MachineFunction() {

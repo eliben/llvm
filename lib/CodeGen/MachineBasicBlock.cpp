@@ -51,6 +51,7 @@ MCSymbol *MachineBasicBlock::getSymbol() const {
   const MachineFunction *MF = getParent();
   MCContext &Ctx = MF->getContext();
   const char *Prefix = Ctx.getAsmInfo().getPrivateGlobalPrefix();
+//  const char *Prefix = MF->getPrivateGlobalPrefix();
   return Ctx.GetOrCreateSymbol(Twine(Prefix) + "BB" +
                                Twine(MF->getFunctionNumber()) + "_" +
                                Twine(getNumber()));

@@ -1012,6 +1012,9 @@ void SelectionDAGISel::SelectAllBasicBlocks(const Function &Fn) {
   for (ReversePostOrderTraversal<const Function*>::rpo_iterator
        I = RPOT.begin(), E = RPOT.end(); I != E; ++I) {
     const BasicBlock *LLVMBB = *I;
+    //errs() << "Dumping BB\n";
+    //LLVMBB->dump();
+    //errs() << "\n";
 
     if (OptLevel != CodeGenOpt::None) {
       bool AllPredsVisited = true;
