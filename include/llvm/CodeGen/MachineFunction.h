@@ -279,12 +279,12 @@ public:
   /// it are renumbered.
   void RenumberBlocks(MachineBasicBlock *MBBFrom = 0);
   
-  /// \brief Get the MCSymbol for the MBB number N.
+  /// \brief Get the MCSymbol for MBB number N.
   MCSymbol *getSymbolForMBB(unsigned N) const {
     assert(N < MBBNumbering.size() && "Illegal block number");
 
     // The template contains the name of the previous symbol.  Resize it to
-    // MBBSymbolNamePrefixLength to get rid of the previous MBB's numer and
+    // MBBSymbolNamePrefixLength to get rid of the previous MBB's number and
     // append the new one.
     MBBSymbolTemplate.resize(MBBSymbolNamePrefixLength);
     raw_svector_ostream OS(MBBSymbolTemplate);

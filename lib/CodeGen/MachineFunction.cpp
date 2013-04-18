@@ -16,7 +16,6 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -76,8 +75,13 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
   JumpTableInfo = 0;
 
   // Initialize the symbol template for the MBBs generated in this function.
-  MBBSymbolTemplate.assign((Twine(Ctx.getAsmInfo().getPrivateGlobalPrefix()) +
-                           "BB" + Twine(getFunctionNumber()) + "_").str());
+  // MBBSymbolNamePrefixLength keeps the length of this template for the
+  // duration of the run (so we know where the common part ends and the per-MBB
+  // number starts.
+  raw_svector_ostream OS(MBBSymbolTemplate);
+  OS << Ctx.getAsmInfo().getPrivateGlobalPrefix() << "BB" <<
+        getFunctionNumber() << "_";
+  OS.flush();
   MBBSymbolNamePrefixLength = MBBSymbolTemplate.size();
 }
 
