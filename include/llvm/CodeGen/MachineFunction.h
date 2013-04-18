@@ -19,10 +19,13 @@
 #define LLVM_CODEGEN_MACHINEFUNCTION_H
 
 #include "llvm/ADT/ilist.h"
+#include "llvm/ADT/SmallString.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/ArrayRecycler.h"
 #include "llvm/Support/DebugLoc.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Recycler.h"
 
 namespace llvm {
@@ -35,7 +38,6 @@ class MachineFrameInfo;
 class MachineConstantPool;
 class MachineJumpTableInfo;
 class MachineModuleInfo;
-class MCContext;
 class Pass;
 class TargetMachine;
 class TargetRegisterClass;
@@ -99,6 +101,13 @@ class MachineFunction {
   // MachineBasicBlock is inserted into a MachineFunction is it automatically
   // numbered and this vector keeps track of the mapping from ID's to MBB's.
   std::vector<MachineBasicBlock*> MBBNumbering;
+
+  // When symbols are generated for MBBs they all follow a simple template,
+  // ending with the block number.  Since most of the template is common to
+  // all MBBs in a function, it is cached here and only the changing part
+  // is recomputed.
+  mutable SmallString<256> MBBSymbolTemplate;
+  unsigned MBBSymbolNamePrefixLength;
 
   // Pool-allocate MachineFunction-lifetime and IR objects.
   BumpPtrAllocator Allocator;
@@ -184,7 +193,6 @@ public:
   /// getOrCreateJumpTableInfo - Get the JumpTableInfo for this function, if it
   /// does already exist, allocate one.
   MachineJumpTableInfo *getOrCreateJumpTableInfo(unsigned JTEntryKind);
-
   
   /// getConstantPool - Return the constant pool object for the current
   /// function.
@@ -271,6 +279,19 @@ public:
   /// it are renumbered.
   void RenumberBlocks(MachineBasicBlock *MBBFrom = 0);
   
+  /// \brief Get the MCSymbol for the MBB number N.
+  MCSymbol *getSymbolForMBB(unsigned N) const {
+    assert(N < MBBNumbering.size() && "Illegal block number");
+
+    // The template contains the name of the previous symbol.  Resize it to
+    // MBBSymbolNamePrefixLength to get rid of the previous MBB's numer and
+    // append the new one.
+    MBBSymbolTemplate.resize(MBBSymbolNamePrefixLength);
+    raw_svector_ostream OS(MBBSymbolTemplate);
+    OS << N; OS.flush();
+    return Ctx.GetOrCreateSymbol(MBBSymbolTemplate.str());
+  }
+
   /// print - Print out the MachineFunction in a format suitable for debugging
   /// to the specified stream.
   ///

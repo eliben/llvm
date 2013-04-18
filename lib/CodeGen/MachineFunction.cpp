@@ -16,6 +16,7 @@
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -73,6 +74,11 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                          TM.getTargetLowering()->getPrefFunctionAlignment());
   FunctionNumber = FunctionNum;
   JumpTableInfo = 0;
+
+  // Initialize the symbol template for the MBBs generated in this function.
+  MBBSymbolTemplate.assign((Twine(Ctx.getAsmInfo().getPrivateGlobalPrefix()) +
+                           "BB" + Twine(getFunctionNumber()) + "_").str());
+  MBBSymbolNamePrefixLength = MBBSymbolTemplate.size();
 }
 
 MachineFunction::~MachineFunction() {
