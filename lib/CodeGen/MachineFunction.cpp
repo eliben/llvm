@@ -73,6 +73,16 @@ MachineFunction::MachineFunction(const Function *F, const TargetMachine &TM,
                          TM.getTargetLowering()->getPrefFunctionAlignment());
   FunctionNumber = FunctionNum;
   JumpTableInfo = 0;
+
+  // Initialize the symbol template for the MBBs generated in this function.
+  // MBBSymbolNamePrefixLength keeps the length of this template for the
+  // duration of the run (so we know where the common part ends and the per-MBB
+  // number starts.
+  raw_svector_ostream OS(MBBSymbolTemplate);
+  OS << Ctx.getAsmInfo().getPrivateGlobalPrefix() << "BB" <<
+        getFunctionNumber() << "_";
+  OS.flush();
+  MBBSymbolNamePrefixLength = MBBSymbolTemplate.size();
 }
 
 MachineFunction::~MachineFunction() {

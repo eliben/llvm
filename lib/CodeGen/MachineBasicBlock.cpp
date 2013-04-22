@@ -48,14 +48,8 @@ MachineBasicBlock::~MachineBasicBlock() {
 /// getSymbol - Return the MCSymbol for this basic block.
 ///
 MCSymbol *MachineBasicBlock::getSymbol() const {
-  const MachineFunction *MF = getParent();
-  MCContext &Ctx = MF->getContext();
-  const char *Prefix = Ctx.getAsmInfo().getPrivateGlobalPrefix();
-  return Ctx.GetOrCreateSymbol(Twine(Prefix) + "BB" +
-                               Twine(MF->getFunctionNumber()) + "_" +
-                               Twine(getNumber()));
+  return getParent()->getSymbolForMBB(getNumber());
 }
-
 
 raw_ostream &llvm::operator<<(raw_ostream &OS, const MachineBasicBlock &MBB) {
   MBB.print(OS);
