@@ -21,7 +21,7 @@ def main():
   for i in range(8):
     line = stream.readline()
     if "LLVM Language R" in line:
-      line = "PNaCl IR Reference Manual\n"
+      line = "PNaCl Bitcode Reference Manual\n"
     sys.stdout.write(line)
 
   # The link target for the following header
