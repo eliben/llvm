@@ -20,6 +20,7 @@
 #include "ARMSubtarget.h"
 #include "ARMTargetMachine.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/Analysis.h"
 #include "llvm/CodeGen/FastISel.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
@@ -1026,7 +1027,7 @@ bool ARMFastISel::ARMEmitLoad(MVT VT, unsigned &ResultReg, Address &Addr,
           useAM3 = true;
         }
       }
-      RC = &ARM::GPRRegClass;
+      RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRnopcRegClass;
       break;
     case MVT::i16:
       if (Alignment && Alignment < 2 && !Subtarget->allowsUnalignedMem())
@@ -1041,7 +1042,7 @@ bool ARMFastISel::ARMEmitLoad(MVT VT, unsigned &ResultReg, Address &Addr,
         Opc = isZExt ? ARM::LDRH : ARM::LDRSH;
         useAM3 = true;
       }
-      RC = &ARM::GPRRegClass;
+      RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRnopcRegClass;
       break;
     case MVT::i32:
       if (Alignment && Alignment < 4 && !Subtarget->allowsUnalignedMem())
@@ -1055,7 +1056,7 @@ bool ARMFastISel::ARMEmitLoad(MVT VT, unsigned &ResultReg, Address &Addr,
       } else {
         Opc = ARM::LDRi12;
       }
-      RC = &ARM::GPRRegClass;
+      RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRnopcRegClass;
       break;
     case MVT::f32:
       if (!Subtarget->hasVFP2()) return false;
@@ -1064,7 +1065,7 @@ bool ARMFastISel::ARMEmitLoad(MVT VT, unsigned &ResultReg, Address &Addr,
         needVMOV = true;
         VT = MVT::i32;
         Opc = isThumb2 ? ARM::t2LDRi12 : ARM::LDRi12;
-        RC = &ARM::GPRRegClass;
+        RC = isThumb2 ? &ARM::rGPRRegClass : &ARM::GPRnopcRegClass;
       } else {
         Opc = ARM::VLDRS;
         RC = TLI.getRegClassFor(VT);
@@ -2662,6 +2663,7 @@ unsigned ARMFastISel::ARMEmitIntExt(MVT SrcVT, unsigned SrcReg, MVT DestVT,
 
   unsigned SrcBits = SrcVT.getSizeInBits();
   unsigned DestBits = DestVT.getSizeInBits();
+  (void) DestBits;
   assert((SrcBits < DestBits) && "can only extend to larger types");
   assert((DestBits == 32 || DestBits == 16 || DestBits == 8) &&
          "other sizes unimplemented");
@@ -2862,6 +2864,25 @@ bool ARMFastISel::TargetSelectInstruction(const Instruction *I) {
   return false;
 }
 
+namespace {
+// This table describes sign- and zero-extend instructions which can be
+// folded into a preceding load. All of these extends have an immediate
+// (sometimes a mask and sometimes a shift) that's applied after
+// extension.
+const struct FoldableLoadExtendsStruct {
+  uint16_t Opc[2];  // ARM, Thumb.
+  uint8_t ExpectedImm;
+  uint8_t isZExt     : 1;
+  uint8_t ExpectedVT : 7;
+} FoldableLoadExtends[] = {
+  { { ARM::SXTH,  ARM::t2SXTH  },   0, 0, MVT::i16 },
+  { { ARM::UXTH,  ARM::t2UXTH  },   0, 1, MVT::i16 },
+  { { ARM::ANDri, ARM::t2ANDri }, 255, 1, MVT::i8  },
+  { { ARM::SXTB,  ARM::t2SXTB  },   0, 0, MVT::i8  },
+  { { ARM::UXTB,  ARM::t2UXTB  },   0, 1, MVT::i8  }
+};
+}
+
 /// \brief The specified machine instr operand is a vreg, and that
 /// vreg is being provided by the specified load instruction.  If possible,
 /// try to fold the load as an operand to the instruction, returning true if
@@ -2877,26 +2898,23 @@ bool ARMFastISel::tryToFoldLoadIntoMI(MachineInstr *MI, unsigned OpNo,
   // ldrb r1, [r0]       ldrb r1, [r0]
   // uxtb r2, r1     =>
   // mov  r3, r2         mov  r3, r1
-  bool isZExt = true;
-  switch(MI->getOpcode()) {
-    default: return false;
-    case ARM::SXTH:
-    case ARM::t2SXTH:
-      isZExt = false;
-    case ARM::UXTH:
-    case ARM::t2UXTH:
-      if (VT != MVT::i16)
-        return false;
-    break;
-    case ARM::SXTB:
-    case ARM::t2SXTB:
-      isZExt = false;
-    case ARM::UXTB:
-    case ARM::t2UXTB:
-      if (VT != MVT::i8)
-        return false;
-    break;
+  if (MI->getNumOperands() < 3 || !MI->getOperand(2).isImm())
+    return false;
+  const uint64_t Imm = MI->getOperand(2).getImm();
+
+  bool Found = false;
+  bool isZExt;
+  for (unsigned i = 0, e = array_lengthof(FoldableLoadExtends);
+       i != e; ++i) {
+    if (FoldableLoadExtends[i].Opc[isThumb2] == MI->getOpcode() &&
+        (uint64_t)FoldableLoadExtends[i].ExpectedImm == Imm &&
+        MVT((MVT::SimpleValueType)FoldableLoadExtends[i].ExpectedVT) == VT) {
+      Found = true;
+      isZExt = FoldableLoadExtends[i].isZExt;
+    }
   }
+  if (!Found) return false;
+
   // See if we can handle this address.
   Address Addr;
   if (!ARMComputeAddress(LI->getOperand(0), Addr)) return false;

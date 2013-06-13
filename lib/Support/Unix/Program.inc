@@ -47,13 +47,9 @@
 namespace llvm {
 using namespace sys;
 
-Program::Program() : Data_(0) {}
-
-Program::~Program() {}
-
 // This function just uses the PATH environment variable to find the program.
 Path
-Program::FindProgramByName(const std::string& progName) {
+sys::FindProgramByName(const std::string& progName) {
 
   // Check some degenerate cases
   if (progName.length() == 0) // no program
@@ -180,10 +176,11 @@ static void SetMemoryLimits (unsigned size)
 #endif
 }
 
-bool
-Program::Execute(const Path &path, const char **args, const char **envp,
-                 const Path **redirects, unsigned memoryLimit,
-                  std::string *ErrMsg) {
+}
+
+static bool Execute(void **Data, const Path &path, const char **args,
+                    const char **envp, const Path **redirects,
+                    unsigned memoryLimit, std::string *ErrMsg) {
   // If this OS has posix_spawn and there is no memory limit being implied, use
   // posix_spawn.  It is more efficient than fork/exec.
 #ifdef HAVE_POSIX_SPAWN
@@ -231,7 +228,8 @@ Program::Execute(const Path &path, const char **args, const char **envp,
     if (Err)
      return !MakeErrMsg(ErrMsg, "posix_spawn failed", Err);
 
-    Data_ = reinterpret_cast<void*>(PID);
+    if (Data)
+      *Data = reinterpret_cast<void*>(PID);
     return true;
   }
 #endif
@@ -293,23 +291,17 @@ Program::Execute(const Path &path, const char **args, const char **envp,
       break;
   }
 
-  Data_ = reinterpret_cast<void*>(child);
+  if (Data)
+    *Data = reinterpret_cast<void*>(child);
 
   return true;
 }
 
-int
-Program::Wait(const sys::Path &path,
-              unsigned secondsToWait,
-              std::string* ErrMsg)
-{
+static int Wait(void *&Data, const sys::Path &path, unsigned secondsToWait,
+                std::string *ErrMsg) {
 #ifdef HAVE_SYS_WAIT_H
   struct sigaction Act, Old;
-
-  if (Data_ == 0) {
-    MakeErrMsg(ErrMsg, "Process not started!");
-    return -1;
-  }
+  assert(Data && "invalid pid to wait on, process not started?");
 
   // Install a timeout handler.  The handler itself does nothing, but the simple
   // fact of having a handler at all causes the wait below to return with EINTR,
@@ -324,7 +316,7 @@ Program::Wait(const sys::Path &path,
 
   // Parent process: Wait for the child process to terminate.
   int status;
-  uint64_t pid = reinterpret_cast<uint64_t>(Data_);
+  uint64_t pid = reinterpret_cast<uint64_t>(Data);
   pid_t child = static_cast<pid_t>(pid);
   while (waitpid(pid, &status, 0) != child)
     if (secondsToWait && errno == EINTR) {
@@ -397,17 +389,19 @@ Program::Wait(const sys::Path &path,
 #endif
 }
 
-error_code Program::ChangeStdinToBinary(){
+namespace llvm {
+
+error_code sys::ChangeStdinToBinary(){
   // Do nothing, as Unix doesn't differentiate between text and binary.
   return make_error_code(errc::success);
 }
 
-error_code Program::ChangeStdoutToBinary(){
+error_code sys::ChangeStdoutToBinary(){
   // Do nothing, as Unix doesn't differentiate between text and binary.
   return make_error_code(errc::success);
 }
 
-error_code Program::ChangeStderrToBinary(){
+error_code sys::ChangeStderrToBinary(){
   // Do nothing, as Unix doesn't differentiate between text and binary.
   return make_error_code(errc::success);
 }

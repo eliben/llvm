@@ -152,12 +152,19 @@ class ARMAsmParser : public MCTargetAsmParser {
   bool isThumbTwo() const {
     return isThumb() && (STI.getFeatureBits() & ARM::FeatureThumb2);
   }
+  bool hasThumb() const {
+    return STI.getFeatureBits() & ARM::HasV4TOps;
+  }
   bool hasV6Ops() const {
     return STI.getFeatureBits() & ARM::HasV6Ops;
   }
   bool hasV7Ops() const {
     return STI.getFeatureBits() & ARM::HasV7Ops;
   }
+  bool hasARM() const {
+    return !(STI.getFeatureBits() & ARM::FeatureNoARM);
+  }
+
   void SwitchMode() {
     unsigned FB = ComputeAvailableFeatures(STI.ToggleFeature(ARM::ModeThumb));
     setAvailableFeatures(FB);
@@ -182,6 +189,8 @@ class ARMAsmParser : public MCTargetAsmParser {
   OperandMatchResultTy parseCoprocOptionOperand(
     SmallVectorImpl<MCParsedAsmOperand*>&);
   OperandMatchResultTy parseMemBarrierOptOperand(
+    SmallVectorImpl<MCParsedAsmOperand*>&);
+  OperandMatchResultTy parseInstSyncBarrierOptOperand(
     SmallVectorImpl<MCParsedAsmOperand*>&);
   OperandMatchResultTy parseProcIFlagsOperand(
     SmallVectorImpl<MCParsedAsmOperand*>&);
@@ -315,6 +324,7 @@ class ARMOperand : public MCParsedAsmOperand {
     k_CoprocOption,
     k_Immediate,
     k_MemBarrierOpt,
+    k_InstSyncBarrierOpt,
     k_Memory,
     k_PostIndexRegister,
     k_MSRMask,
@@ -356,6 +366,10 @@ class ARMOperand : public MCParsedAsmOperand {
 
   struct MBOptOp {
     ARM_MB::MemBOpt Val;
+  };
+
+  struct ISBOptOp {
+    ARM_ISB::InstSyncBOpt Val;
   };
 
   struct IFlagsOp {
@@ -444,6 +458,7 @@ class ARMOperand : public MCParsedAsmOperand {
     struct CopOp Cop;
     struct CoprocOptionOp CoprocOption;
     struct MBOptOp MBOpt;
+    struct ISBOptOp ISBOpt;
     struct ITMaskOp ITMask;
     struct IFlagsOp IFlags;
     struct MMaskOp MMask;
@@ -504,6 +519,8 @@ public:
     case k_MemBarrierOpt:
       MBOpt = o.MBOpt;
       break;
+    case k_InstSyncBarrierOpt:
+      ISBOpt = o.ISBOpt;
     case k_Memory:
       Memory = o.Memory;
       break;
@@ -584,6 +601,11 @@ public:
   ARM_MB::MemBOpt getMemBarrierOpt() const {
     assert(Kind == k_MemBarrierOpt && "Invalid access!");
     return MBOpt.Val;
+  }
+
+  ARM_ISB::InstSyncBOpt getInstSyncBarrierOpt() const {
+    assert(Kind == k_InstSyncBarrierOpt && "Invalid access!");
+    return ISBOpt.Val;
   }
 
   ARM_PROC::IFlags getProcIFlags() const {
@@ -925,6 +947,7 @@ public:
   bool isSPRRegList() const { return Kind == k_SPRRegisterList; }
   bool isToken() const { return Kind == k_Token; }
   bool isMemBarrierOpt() const { return Kind == k_MemBarrierOpt; }
+  bool isInstSyncBarrierOpt() const { return Kind == k_InstSyncBarrierOpt; }
   bool isMem() const { return Kind == k_Memory; }
   bool isShifterImm() const { return Kind == k_ShifterImmediate; }
   bool isRegShiftedReg() const { return Kind == k_ShiftedRegister; }
@@ -971,7 +994,7 @@ public:
     const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(getImm());
     if (!CE) return false;
     int64_t Val = CE->getValue();
-    return Val > -4096 && Val < 4096;
+    return (Val == INT32_MIN) || (Val > -4096 && Val < 4096);
   }
   bool isAddrMode3() const {
     // If we have an immediate that's not a constant, treat it as a label
@@ -1702,6 +1725,11 @@ public:
     Inst.addOperand(MCOperand::CreateImm(unsigned(getMemBarrierOpt())));
   }
 
+  void addInstSyncBarrierOptOperands(MCInst &Inst, unsigned N) const {
+    assert(N == 1 && "Invalid number of operands!");
+    Inst.addOperand(MCOperand::CreateImm(unsigned(getInstSyncBarrierOpt())));
+  }
+
   void addMemNoOffsetOperands(MCInst &Inst, unsigned N) const {
     assert(N == 1 && "Invalid number of operands!");
     Inst.addOperand(MCOperand::CreateReg(Memory.BaseRegNum));
@@ -2367,6 +2395,15 @@ public:
     return Op;
   }
 
+  static ARMOperand *CreateInstSyncBarrierOpt(ARM_ISB::InstSyncBOpt Opt,
+                                              SMLoc S) {
+    ARMOperand *Op = new ARMOperand(k_InstSyncBarrierOpt);
+    Op->ISBOpt.Val = Opt;
+    Op->StartLoc = S;
+    Op->EndLoc = S;
+    return Op;
+  }
+
   static ARMOperand *CreateProcIFlags(ARM_PROC::IFlags IFlags, SMLoc S) {
     ARMOperand *Op = new ARMOperand(k_ProcIFlags);
     Op->IFlags.Val = IFlags;
@@ -2420,6 +2457,9 @@ void ARMOperand::print(raw_ostream &OS) const {
     break;
   case k_MemBarrierOpt:
     OS << "<ARM_MB::" << MemBOptToString(getMemBarrierOpt()) << ">";
+    break;
+  case k_InstSyncBarrierOpt:
+    OS << "<ARM_ISB::" << InstSyncBOptToString(getInstSyncBarrierOpt()) << ">";
     break;
   case k_Memory:
     OS << "<memory "
@@ -3058,7 +3098,7 @@ parseVectorLane(VectorLaneTy &LaneKind, unsigned &Index, SMLoc &EndLoc) {
     // There's an optional '#' token here. Normally there wouldn't be, but
     // inline assemble puts one in, and it's friendly to accept that.
     if (Parser.getTok().is(AsmToken::Hash))
-      Parser.Lex(); // Eat the '#'
+      Parser.Lex(); // Eat '#' or '$'.
 
     const MCExpr *LaneIndex;
     SMLoc Loc = Parser.getTok().getLoc();
@@ -3376,7 +3416,7 @@ parseMemBarrierOptOperand(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
              Tok.is(AsmToken::Dollar) ||
              Tok.is(AsmToken::Integer)) {
     if (Parser.getTok().isNot(AsmToken::Integer))
-      Parser.Lex(); // Eat the '#'.
+      Parser.Lex(); // Eat '#' or '$'.
     SMLoc Loc = Parser.getTok().getLoc();
 
     const MCExpr *MemBarrierID;
@@ -3404,6 +3444,57 @@ parseMemBarrierOptOperand(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
   Operands.push_back(ARMOperand::CreateMemBarrierOpt((ARM_MB::MemBOpt)Opt, S));
   return MatchOperand_Success;
 }
+
+/// parseInstSyncBarrierOptOperand - Try to parse ISB inst sync barrier options.
+ARMAsmParser::OperandMatchResultTy ARMAsmParser::
+parseInstSyncBarrierOptOperand(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
+  SMLoc S = Parser.getTok().getLoc();
+  const AsmToken &Tok = Parser.getTok();
+  unsigned Opt;
+
+  if (Tok.is(AsmToken::Identifier)) {
+    StringRef OptStr = Tok.getString();
+
+    if (OptStr.lower() == "sy")
+      Opt = ARM_ISB::SY;
+    else
+      return MatchOperand_NoMatch;
+
+    Parser.Lex(); // Eat identifier token.
+  } else if (Tok.is(AsmToken::Hash) ||
+             Tok.is(AsmToken::Dollar) ||
+             Tok.is(AsmToken::Integer)) {
+    if (Parser.getTok().isNot(AsmToken::Integer))
+      Parser.Lex(); // Eat '#' or '$'.
+    SMLoc Loc = Parser.getTok().getLoc();
+
+    const MCExpr *ISBarrierID;
+    if (getParser().parseExpression(ISBarrierID)) {
+      Error(Loc, "illegal expression");
+      return MatchOperand_ParseFail;
+    }
+
+    const MCConstantExpr *CE = dyn_cast<MCConstantExpr>(ISBarrierID);
+    if (!CE) {
+      Error(Loc, "constant expression expected");
+      return MatchOperand_ParseFail;
+    }
+
+    int Val = CE->getValue();
+    if (Val & ~0xf) {
+      Error(Loc, "immediate value out of range");
+      return MatchOperand_ParseFail;
+    }
+
+    Opt = ARM_ISB::RESERVED_0 + Val;
+  } else
+    return MatchOperand_ParseFail;
+
+  Operands.push_back(ARMOperand::CreateInstSyncBarrierOpt(
+          (ARM_ISB::InstSyncBOpt)Opt, S));
+  return MatchOperand_Success;
+}
+
 
 /// parseProcIFlagsOperand - Try to parse iflags from CPS instruction.
 ARMAsmParser::OperandMatchResultTy ARMAsmParser::
@@ -3897,7 +3988,7 @@ parseAM3Offset(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
   // Do immediates first, as we always parse those if we have a '#'.
   if (Parser.getTok().is(AsmToken::Hash) ||
       Parser.getTok().is(AsmToken::Dollar)) {
-    Parser.Lex(); // Eat the '#'.
+    Parser.Lex(); // Eat '#' or '$'.
     // Explicitly look for a '-', as we need to encode negative zero
     // differently.
     bool isNegative = Parser.getTok().is(AsmToken::Minus);
@@ -4376,7 +4467,7 @@ parseMemory(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
       Parser.getTok().is(AsmToken::Dollar) ||
       Parser.getTok().is(AsmToken::Integer)) {
     if (Parser.getTok().isNot(AsmToken::Integer))
-      Parser.Lex(); // Eat the '#'.
+      Parser.Lex(); // Eat '#' or '$'.
     E = Parser.getTok().getLoc();
 
     bool isNegative = getParser().getTok().is(AsmToken::Minus);
@@ -4558,7 +4649,7 @@ parseFPImm(SmallVectorImpl<MCParsedAsmOperand*> &Operands) {
                            TyOp->getToken() != ".f64"))
     return MatchOperand_NoMatch;
 
-  Parser.Lex(); // Eat the '#'.
+  Parser.Lex(); // Eat '#' or '$'.
 
   // Handle negation, as that still comes through as a separate token.
   bool isNegative = false;
@@ -7732,6 +7823,9 @@ bool ARMAsmParser::parseDirectiveThumb(SMLoc L) {
     return Error(L, "unexpected token in directive");
   Parser.Lex();
 
+  if (!hasThumb())
+    return Error(L, "target does not support Thumb mode");
+
   if (!isThumb())
     SwitchMode();
   getParser().getStreamer().EmitAssemblerFlag(MCAF_Code16);
@@ -7744,6 +7838,9 @@ bool ARMAsmParser::parseDirectiveARM(SMLoc L) {
   if (getLexer().isNot(AsmToken::EndOfStatement))
     return Error(L, "unexpected token in directive");
   Parser.Lex();
+
+  if (!hasARM())
+    return Error(L, "target does not support ARM mode");
 
   if (isThumb())
     SwitchMode();
@@ -7834,10 +7931,16 @@ bool ARMAsmParser::parseDirectiveCode(SMLoc L) {
   Parser.Lex();
 
   if (Val == 16) {
+    if (!hasThumb())
+      return Error(L, "target does not support Thumb mode");
+
     if (!isThumb())
       SwitchMode();
     getParser().getStreamer().EmitAssemblerFlag(MCAF_Code16);
   } else {
+    if (!hasARM())
+      return Error(L, "target does not support ARM mode");
+
     if (isThumb())
       SwitchMode();
     getParser().getStreamer().EmitAssemblerFlag(MCAF_Code32);

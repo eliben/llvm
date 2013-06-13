@@ -47,8 +47,8 @@ using namespace llvm;
 char PEI::ID = 0;
 char &llvm::PrologEpilogCodeInserterID = PEI::ID;
 
-static cl::opt<uint64_t>
-WarnStackSize("warn-stack-size", cl::Hidden,
+static cl::opt<unsigned>
+WarnStackSize("warn-stack-size", cl::Hidden, cl::init((unsigned)-1),
               cl::desc("Warn for stack size bigger than the given"
                        " number"));
 
