@@ -24,6 +24,8 @@ reference manual.
 contents into this document; also, the physical encoding will also be described
 here in the future, once we know what it's going to be]*
 
+**Note:** constructs not mentioned in this document are **not supported**.
+
 Identifiers
 ===========
 
@@ -102,30 +104,21 @@ Parameter Attributes
 
 `LLVM LangRef: Parameter Attributes <LangRef.html#paramattrs>`_
 
-Attribute Groups
-----------------
-
-`LLVM LangRef: Attribute Groups <LangRef.html#attrgrp>`_
+TODO: what parameter attributes are supported.
 
 Function Attributes
 -------------------
 
 `LLVM LangRef: Function Attributes <LangRef.html#fnattrs>`_
 
+PNaCl bitcode does not support function attributes.
+
 Module-Level Inline Assembly
 ----------------------------
 
 `LLVM LangRef: Module-Level Inline Assembly <LangRef.html#moduleasm>`_
 
-Data Layout
------------
-
-`LLVM LangRef: Data Layout <LangRef.html#langref_datalayout>`_
-
-Pointer Aliasing Rules
-----------------------
-
-`LLVM LangRef: Pointer Aliasing Rules <LangRef.html#pointeraliasing>`_
+PNaCl bitcode does not support inline assembly.
 
 Volatile Memory Accesses
 ------------------------
@@ -137,198 +130,36 @@ Memory Model for Concurrent Operations
 
 `LLVM LangRef: Memory Model for Concurrent Operations <LangRef.html#memmodel>`_
 
+TODO.
+
 Atomic Memory Ordering Constraints
 ----------------------------------
 
 `LLVM LangRef: Atomic Memory Ordering Constraints <LangRef.html#ordering>`_
+
+TODO.
 
 Fast-Math Flags
 ---------------
 
 `LLVM LangRef: Fast-Math Flags <LangRef.html#fastmath>`_
 
+Fast-math mode is not currently supported by the PNaCl bitcode.
+
 Type System
 ===========
 
 `LLVM LangRef: Type System <LangRef.html#typesystem>`_
 
-Type Classifications
---------------------
+The LLVM types allowed in PNaCl bitcode are restricted, as follows:
 
-`LLVM LangRef: Type Classifications <LangRef.html#typeclassifications>`_
+* The only scalar types allowed are integer, float, double and void.
 
-Primitive Types
----------------
+  * The only integer sizes allowed are i1, i8, i16, i32 and i64.
+  * The only integer sizes allowed for function arguments are i32 and i64.
 
-`LLVM LangRef: Primitive Types <LangRef.html#t_primitive>`_
-
-Integer Type
-^^^^^^^^^^^^
-
-`LLVM LangRef: Integer Type <LangRef.html#t_integer>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Floating Point Types
-^^^^^^^^^^^^^^^^^^^^
-
-`LLVM LangRef: Floating Point Types <LangRef.html#t_floating>`_
-
-X86mmx Type
-^^^^^^^^^^^
-
-`LLVM LangRef: X86mmx Type <LangRef.html#t_x86mmx>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Void Type
-^^^^^^^^^
-
-`LLVM LangRef: Void Type <LangRef.html#t_void>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Label Type
-^^^^^^^^^^
-
-`LLVM LangRef: Label Type <LangRef.html#t_label>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Metadata Type
-^^^^^^^^^^^^^
-
-`LLVM LangRef: Metadata Type <LangRef.html#t_metadata>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Derived Types
--------------
-
-`LLVM LangRef: Derived Types <LangRef.html#t_derived>`_
-
-Aggregate Types
-^^^^^^^^^^^^^^^
-
-`LLVM LangRef: Aggregate Types <LangRef.html#t_aggregate>`_
-
-Array Type
-^^^^^^^^^^
-
-`LLVM LangRef: Array Type <LangRef.html#t_array>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Function Type
-^^^^^^^^^^^^^
-
-`LLVM LangRef: Function Type <LangRef.html#t_function>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Structure Type
-^^^^^^^^^^^^^^
-
-`LLVM LangRef: Structure Type <LangRef.html#t_struct>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Opaque Structure Types
-^^^^^^^^^^^^^^^^^^^^^^
-
-`LLVM LangRef: Opaque Structure Types <LangRef.html#t_opaque>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Pointer Type
-^^^^^^^^^^^^
-
-`LLVM LangRef: Pointer Type <LangRef.html#t_pointer>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Vector Type
-^^^^^^^^^^^
-
-`LLVM LangRef: Vector Type <LangRef.html#t_vector>`_
-
-Overview:
-"""""""""
-
-Syntax:
-"""""""
-
-Examples:
-"""""""""
-
-Constants
-=========
-
-Simple Constants
-----------------
-
-Complex Constants
------------------
-
-`LLVM LangRef: Complex Constants <LangRef.html#complexconstants>`_
+Arrays and structs are only allowed in TODO.
+Pointers are only allowed in TODO.
 
 Global Variable and Function Addresses
 --------------------------------------
@@ -343,70 +174,30 @@ Poison Values
 
 `LLVM LangRef: Poison Values <LangRef.html#poisonvalues>`_
 
-Addresses of Basic Blocks
--------------------------
-
-`LLVM LangRef: Addresses of Basic Blocks <LangRef.html#blockaddress>`_
+PNaCl bitcode does not support poison values.
 
 Constant Expressions
 --------------------
 
 `LLVM LangRef: Constant Expressions <LangRef.html#constantexprs>`_
 
+In the general sense, PNaCl bitcode does not support constant expressions.
+There is a single, restricted, use case permitted in global initializers,
+where the ``add`` and ``ptrtoint`` constant expressions are allowed.
+
 Other Values
 ============
-
-Inline Assembler Expressions
-----------------------------
-
-`LLVM LangRef: Inline Assembler Expressions <LangRef.html#inlineasmexprs>`_
-
-Inline Asm Metadata
-^^^^^^^^^^^^^^^^^^^
 
 Metadata Nodes and Metadata Strings
 -----------------------------------
 
 `LLVM LangRef: Metadata Nodes and Metadata Strings <LangRef.html#metadata>`_
 
-'``tbaa``' Metadata
-^^^^^^^^^^^^^^^^^^^
+While PNaCl bitcode has provisions for debugging metadata, it is not considered
+part of the stable ABI. It exists for tool support and should not appear in
+distributed pexes.
 
-'``tbaa.struct``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-'``fpmath``' Metadata
-^^^^^^^^^^^^^^^^^^^^^
-
-'``range``' Metadata
-^^^^^^^^^^^^^^^^^^^^
-
-'``llvm.loop``'
-^^^^^^^^^^^^^^^
-
-'``llvm.mem``'
-^^^^^^^^^^^^^^^
-
-'``llvm.mem.parallel_loop_access``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-'``llvm.vectorizer``'
-^^^^^^^^^^^^^^^^^^^^^
-
-'``llvm.vectorizer.unroll``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-'``llvm.vectorizer.width``' Metadata
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Module Flags Metadata
-=====================
-
-Objective-C Garbage Collection Module Flags Metadata
-----------------------------------------------------
-
-Automatic Linker Flags Module Flags Metadata
---------------------------------------------
+Other kinds of LLVM metadata are not supported.
 
 Intrinsic Global Variables
 ==========================
