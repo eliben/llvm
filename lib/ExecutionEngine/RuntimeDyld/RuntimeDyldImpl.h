@@ -288,7 +288,7 @@ protected:
 
   /// \brief Emits long jump instruction to Addr.
   /// \return Pointer to the memory area for emitting target address.
-  uint8_t* createStubFunction(uint8_t *Addr);
+  uint8_t *createStubFunction(uint8_t *Addr);
 
   /// \brief Resolves relocations from Relocs list with address from Value.
   void resolveRelocationList(const RelocationList &Relocs, uint64_t Value);
@@ -359,6 +359,8 @@ public:
 
   virtual StringRef getEHFrameSection();
 
+  /// \brief Finalize the loading process.
+  /// This method is a hook called as the last step of object loading.
   virtual void finalizeLoad() {}
 };
 
