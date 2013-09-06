@@ -37,6 +37,25 @@
 #include "llvm/Target/TargetLowering.h"
 #include "llvm/Target/TargetMachine.h"
 
+//===----------------------------------------------------------------------===//
+//
+// TBD:
+//   FastLowerArguments: Handle simple cases.
+//   PPCMaterializeGV: Handle TLS.
+//   SelectCall: Handle function pointers.
+//   SelectCall: Handle multi-register return values.
+//   SelectCall: Optimize away nops for local calls.
+//   processCallArgs: Handle bit-converted arguments.
+//   finishCall: Handle multi-register return values.
+//   PPCComputeAddress: Handle parameter references as FrameIndex's.
+//   PPCEmitCmp: Handle immediate as operand 1.
+//   SelectCall: Handle small byval arguments.
+//   SelectIntrinsicCall: Implement.
+//   SelectSelect: Implement.
+//   Consider factoring isTypeLegal into the base class.
+//   Implement switches and jump tables.
+//
+//===----------------------------------------------------------------------===//
 using namespace llvm;
 
 namespace {
@@ -116,6 +135,7 @@ class PPCFastISel : public FastISel {
     bool SelectBinaryIntOp(const Instruction *I, unsigned ISDOpcode);
     bool SelectCall(const Instruction *I);
     bool SelectRet(const Instruction *I);
+    bool SelectTrunc(const Instruction *I);
     bool SelectIntExt(const Instruction *I);
 
   // Utility routines.
@@ -1294,7 +1314,7 @@ void PPCFastISel::finishCall(MVT RetVT, SmallVectorImpl<unsigned> &UsedRegs,
       CopyVT = MVT::i64;
 
     unsigned SourcePhysReg = VA.getLocReg();
-    unsigned ResultReg;
+    unsigned ResultReg = 0;
 
     if (RetVT == CopyVT) {
       const TargetRegisterClass *CpyRC = TLI.getRegClassFor(CopyVT);
@@ -1323,6 +1343,7 @@ void PPCFastISel::finishCall(MVT RetVT, SmallVectorImpl<unsigned> &UsedRegs,
         .addReg(SourcePhysReg);
     }
 
+    assert(ResultReg && "ResultReg unset!");
     UsedRegs.push_back(SourcePhysReg);
     UpdateValueMap(I, ResultReg);
   }
@@ -1649,20 +1670,31 @@ bool PPCFastISel::SelectIndirectBr(const Instruction *I) {
   return true;
 }
 
-// Attempt to fast-select a compare instruction.
-bool PPCFastISel::SelectCmp(const Instruction *I) {
-  const CmpInst *CI = cast<CmpInst>(I);
-  Optional<PPC::Predicate> OptPPCPred = getComparePred(CI->getPredicate());
-  if (!OptPPCPred)
+// Attempt to fast-select an integer truncate instruction.
+bool PPCFastISel::SelectTrunc(const Instruction *I) {
+  Value *Src  = I->getOperand(0);
+  EVT SrcVT  = TLI.getValueType(Src->getType(), true);
+  EVT DestVT = TLI.getValueType(I->getType(), true);
+
+  if (SrcVT != MVT::i64 && SrcVT != MVT::i32 && SrcVT != MVT::i16)
     return false;
 
-  unsigned CondReg = createResultReg(&PPC::CRRCRegClass);
-
-  if (!PPCEmitCmp(CI->getOperand(0), CI->getOperand(1), CI->isUnsigned(),
-                  CondReg))
+  if (DestVT != MVT::i32 && DestVT != MVT::i16 && DestVT != MVT::i8)
     return false;
 
-  UpdateValueMap(I, CondReg);
+  unsigned SrcReg = getRegForValue(Src);
+  if (!SrcReg)
+    return false;
+
+  // The only interesting case is when we need to switch register classes.
+  if (SrcVT == MVT::i64) {
+    unsigned ResultReg = createResultReg(&PPC::GPRCRegClass);
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(TargetOpcode::COPY),
+            ResultReg).addReg(SrcReg, 0, PPC::sub_32);
+    SrcReg = ResultReg;
+  }
+
+  UpdateValueMap(I, SrcReg);
   return true;
 }
 
@@ -1742,6 +1774,8 @@ bool PPCFastISel::TargetSelectInstruction(const Instruction *I) {
       return SelectCall(I);
     case Instruction::Ret:
       return SelectRet(I);
+    case Instruction::Trunc:
+      return SelectTrunc(I);
     case Instruction::ZExt:
     case Instruction::SExt:
       return SelectIntExt(I);
@@ -1993,15 +2027,30 @@ unsigned PPCFastISel::TargetMaterializeConstant(const Constant *C) {
     return PPCMaterializeGV(GV, VT);
   else if (isa<ConstantInt>(C))
     return PPCMaterializeInt(C, VT);
-  // TBD: Global values.
 
   return 0;
 }
 
 // Materialize the address created by an alloca into a register, and
-// return the register number (or zero if we failed to handle it).  TBD.
+// return the register number (or zero if we failed to handle it).
 unsigned PPCFastISel::TargetMaterializeAlloca(const AllocaInst *AI) {
-  return AI && 0;
+  // Don't handle dynamic allocas.
+  if (!FuncInfo.StaticAllocaMap.count(AI)) return 0;
+
+  MVT VT;
+  if (!isLoadTypeLegal(AI->getType(), VT)) return 0;
+
+  DenseMap<const AllocaInst*, int>::iterator SI =
+    FuncInfo.StaticAllocaMap.find(AI);
+
+  if (SI != FuncInfo.StaticAllocaMap.end()) {
+    unsigned ResultReg = createResultReg(&PPC::G8RC_and_G8RC_NOX0RegClass);
+    BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DL, TII.get(PPC::ADDI8),
+            ResultReg).addFrameIndex(SI->second).addImm(0);
+    return ResultReg;
+  }
+
+  return 0;
 }
 
 // Fold loads into extends when possible.

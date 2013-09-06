@@ -413,7 +413,7 @@ class ArithLogicI<string opstr, Operand Od, RegisterOperand RO,
 // Arithmetic Multiply ADD/SUB
 class MArithR<string opstr, bit isComm = 0> :
   InstSE<(outs), (ins GPR32Opnd:$rs, GPR32Opnd:$rt),
-         !strconcat(opstr, "\t$rs, $rt"), [], IIImult, FrmR> {
+         !strconcat(opstr, "\t$rs, $rt"), [], IIImult, FrmR, opstr> {
   let Defs = [HI0, LO0];
   let Uses = [HI0, LO0];
   let isCommutable = isComm;
@@ -690,13 +690,15 @@ class Div<string opstr, InstrItinClass itin, RegisterOperand RO,
 
 // Move from Hi/Lo
 class MoveFromLOHI<string opstr, RegisterOperand RO, list<Register> UseRegs>:
-  InstSE<(outs RO:$rd), (ins), !strconcat(opstr, "\t$rd"), [], IIHiLo, FrmR> {
+  InstSE<(outs RO:$rd), (ins), !strconcat(opstr, "\t$rd"), [], IIHiLo,
+  FrmR, opstr> {
   let Uses = UseRegs;
   let neverHasSideEffects = 1;
 }
 
 class MoveToLOHI<string opstr, RegisterOperand RO, list<Register> DefRegs>:
-  InstSE<(outs), (ins RO:$rs), !strconcat(opstr, "\t$rs"), [], IIHiLo, FrmR> {
+  InstSE<(outs), (ins RO:$rs), !strconcat(opstr, "\t$rs"), [], IIHiLo,
+  FrmR, opstr> {
   let Defs = DefRegs;
   let neverHasSideEffects = 1;
 }
@@ -1016,10 +1018,10 @@ def PseudoSDIV : MultDivPseudo<SDIV, ACC64, GPR32Opnd, MipsDivRem, IIIdiv,
 def PseudoUDIV : MultDivPseudo<UDIV, ACC64, GPR32Opnd, MipsDivRemU, IIIdiv,
                                0, 1, 1>;
 
-def MTHI : MoveToLOHI<"mthi", GPR32Opnd, [HI0]>, MTLO_FM<0x11>;
-def MTLO : MoveToLOHI<"mtlo", GPR32Opnd, [LO0]>, MTLO_FM<0x13>;
-def MFHI : MoveFromLOHI<"mfhi", GPR32Opnd, [HI0]>, MFLO_FM<0x10>;
-def MFLO : MoveFromLOHI<"mflo", GPR32Opnd, [LO0]>, MFLO_FM<0x12>;
+def MTHI : MMRel, MoveToLOHI<"mthi", GPR32Opnd, [HI0]>, MTLO_FM<0x11>;
+def MTLO : MMRel, MoveToLOHI<"mtlo", GPR32Opnd, [LO0]>, MTLO_FM<0x13>;
+def MFHI : MMRel, MoveFromLOHI<"mfhi", GPR32Opnd, [HI0]>, MFLO_FM<0x10>;
+def MFLO : MMRel, MoveFromLOHI<"mflo", GPR32Opnd, [LO0]>, MFLO_FM<0x12>;
 
 /// Sign Ext In Register Instructions.
 def SEB : SignExtInReg<"seb", i8, GPR32Opnd>, SEB_FM<0x10, 0x20>;
@@ -1042,10 +1044,10 @@ def NOP : PseudoSE<(outs), (ins), []>, PseudoInstExpansion<(SLL ZERO, ZERO, 0)>;
 def LEA_ADDiu : EffectiveAddress<"addiu", GPR32Opnd>, LW_FM<9>;
 
 // MADD*/MSUB*
-def MADD  : MArithR<"madd", 1>, MULT_FM<0x1c, 0>;
-def MADDU : MArithR<"maddu", 1>, MULT_FM<0x1c, 1>;
-def MSUB  : MArithR<"msub">, MULT_FM<0x1c, 4>;
-def MSUBU : MArithR<"msubu">, MULT_FM<0x1c, 5>;
+def MADD  : MMRel, MArithR<"madd", 1>, MULT_FM<0x1c, 0>;
+def MADDU : MMRel, MArithR<"maddu", 1>, MULT_FM<0x1c, 1>;
+def MSUB  : MMRel, MArithR<"msub">, MULT_FM<0x1c, 4>;
+def MSUBU : MMRel, MArithR<"msubu">, MULT_FM<0x1c, 5>;
 def PseudoMADD  : MAddSubPseudo<MADD, MipsMAdd>;
 def PseudoMADDU : MAddSubPseudo<MADDU, MipsMAddu>;
 def PseudoMSUB  : MAddSubPseudo<MSUB, MipsMSub>;

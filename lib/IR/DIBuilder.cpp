@@ -322,7 +322,7 @@ DIDerivedType DIBuilder::createMemberPointerType(DIType PointeeTy,
     ConstantInt::get(Type::getInt64Ty(VMContext), 0), // Offset
     ConstantInt::get(Type::getInt32Ty(VMContext), 0), // Flags
     PointeeTy,
-    Base
+    Base.generateRef()
   };
   return DIDerivedType(MDNode::get(VMContext, Elts));
 }
@@ -626,7 +626,7 @@ DICompositeType DIBuilder::createClassType(DIDescriptor Context, StringRef Name,
     DerivedFrom,
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), 0),
-    VTableHolder,
+    DIType(VTableHolder).generateRef(),
     TemplateParams,
     UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
@@ -663,7 +663,7 @@ DICompositeType DIBuilder::createStructType(DIDescriptor Context,
     DerivedFrom,
     Elements,
     ConstantInt::get(Type::getInt32Ty(VMContext), RunTimeLang),
-    VTableHolder,
+    DIType(VTableHolder).generateRef(),
     NULL,
     UniqueIdentifier.empty() ? NULL : MDString::get(VMContext, UniqueIdentifier)
   };
