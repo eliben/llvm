@@ -15,6 +15,7 @@
 #include "BreakpointPrinter.h"
 #include "NewPMDriver.h"
 #include "PassPrinters.h"
+#include "OptUtils.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
@@ -183,91 +184,15 @@ DefaultDataLayout("default-data-layout",
           cl::desc("data layout string to use if not specified by module"),
           cl::value_desc("layout-string"), cl::init(""));
 
-
-
-static inline void addPass(PassManagerBase &PM, Pass *P) {
-  // Add the pass to the pass manager...
-  PM.add(P);
-
-  // If we are verifying all of the intermediate steps, add the verifier...
-  if (VerifyEach) PM.add(createVerifierPass());
-}
-
-/// AddOptimizationPasses - This routine adds optimization passes
-/// based on selected optimization level, OptLevel. This routine
-/// duplicates llvm-gcc behaviour.
-///
-/// OptLevel - Optimization Level
-static void AddOptimizationPasses(PassManagerBase &MPM,FunctionPassManager &FPM,
-                                  unsigned OptLevel, unsigned SizeLevel) {
-  FPM.add(createVerifierPass());                  // Verify that input is correct
-
-  PassManagerBuilder Builder;
-  Builder.OptLevel = OptLevel;
-  Builder.SizeLevel = SizeLevel;
-
-  if (DisableInline) {
-    // No inlining pass
-  } else if (OptLevel > 1) {
-    unsigned Threshold = 225;
-    if (SizeLevel == 1)      // -Os
-      Threshold = 75;
-    else if (SizeLevel == 2) // -Oz
-      Threshold = 25;
-    if (OptLevel > 2)
-      Threshold = 275;
-    Builder.Inliner = createFunctionInliningPass(Threshold);
-  } else {
-    Builder.Inliner = createAlwaysInlinerPass();
-  }
-  Builder.DisableUnitAtATime = !UnitAtATime;
-  Builder.DisableUnrollLoops = (DisableLoopUnrolling.getNumOccurrences() > 0) ?
-                               DisableLoopUnrolling : OptLevel == 0;
-
-  // This is final, unless there is a #pragma vectorize enable
-  if (DisableLoopVectorization)
-    Builder.LoopVectorize = false;
-  // If option wasn't forced via cmd line (-vectorize-loops, -loop-vectorize)
-  else if (!Builder.LoopVectorize)
-    Builder.LoopVectorize = OptLevel > 1 && SizeLevel < 2;
-
-  // When #pragma vectorize is on for SLP, do the same as above
-  Builder.SLPVectorize =
-      DisableSLPVectorization ? false : OptLevel > 1 && SizeLevel < 2;
-
-  Builder.populateFunctionPassManager(FPM);
-  Builder.populateModulePassManager(MPM);
-}
-
-static void AddStandardCompilePasses(PassManagerBase &PM) {
-  PM.add(createVerifierPass());                  // Verify that input is correct
-
-  // If the -strip-debug command line option was specified, do it.
-  if (StripDebug)
-    addPass(PM, createStripSymbolsPass(true));
-
-  if (DisableOptimizations) return;
-
-  // -std-compile-opts adds the same module passes as -O3.
-  PassManagerBuilder Builder;
-  if (!DisableInline)
-    Builder.Inliner = createFunctionInliningPass();
-  Builder.OptLevel = 3;
-  Builder.populateModulePassManager(PM);
-}
-
-static void AddStandardLinkPasses(PassManagerBase &PM) {
-  PM.add(createVerifierPass());                  // Verify that input is correct
-
-  // If the -strip-debug command line option was specified, do it.
-  if (StripDebug)
-    addPass(PM, createStripSymbolsPass(true));
-
-  if (DisableOptimizations) return;
-
-  PassManagerBuilder Builder;
-  Builder.populateLTOPassManager(PM, /*Internalize=*/ !DisableInternalize,
-                                 /*RunInliner=*/ !DisableInline);
+void AddOptimizationPassesWithCmdlineOpts(PassManagerBase &MPM,
+                                          FunctionPassManager &FPM,
+                                          unsigned OptLevel,
+                                          unsigned SizeLevel) {
+  AddOptimizationPasses(
+      MPM, FPM, OptLevel, SizeLevel, DisableInline, UnitAtATime,
+      (DisableLoopUnrolling.getNumOccurrences() > 0) ? DisableLoopUnrolling
+                                                     : OptLevel == 0,
+      DisableLoopVectorization, DisableSLPVectorization);
 }
 
 //===----------------------------------------------------------------------===//
@@ -476,7 +401,7 @@ int main(int argc, char **argv) {
   // If the -strip-debug command line option was specified, add it.  If
   // -std-compile-opts was also specified, it will handle StripDebug.
   if (StripDebug && !StandardCompileOpts)
-    addPass(Passes, createStripSymbolsPass(true));
+    AddPassToPM(Passes, createStripSymbolsPass(true), VerifyEach);
 
   // Create a new optimization pass for each one specified on the command line
   for (unsigned i = 0; i < PassList.size(); ++i) {
@@ -484,38 +409,40 @@ int main(int argc, char **argv) {
     // so, handle it.
     if (StandardCompileOpts &&
         StandardCompileOpts.getPosition() < PassList.getPosition(i)) {
-      AddStandardCompilePasses(Passes);
+      AddStandardCompilePasses(Passes, StripDebug, DisableOptimizations,
+                               DisableInline);
       StandardCompileOpts = false;
     }
 
     if (StandardLinkOpts &&
         StandardLinkOpts.getPosition() < PassList.getPosition(i)) {
-      AddStandardLinkPasses(Passes);
+      AddStandardLinkPasses(Passes, StripDebug, DisableOptimizations,
+                            DisableInline, DisableInternalize);
       StandardLinkOpts = false;
     }
 
     if (OptLevelO1 && OptLevelO1.getPosition() < PassList.getPosition(i)) {
-      AddOptimizationPasses(Passes, *FPasses, 1, 0);
+      AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 1, 0);
       OptLevelO1 = false;
     }
 
     if (OptLevelO2 && OptLevelO2.getPosition() < PassList.getPosition(i)) {
-      AddOptimizationPasses(Passes, *FPasses, 2, 0);
+      AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 2, 0);
       OptLevelO2 = false;
     }
 
     if (OptLevelOs && OptLevelOs.getPosition() < PassList.getPosition(i)) {
-      AddOptimizationPasses(Passes, *FPasses, 2, 1);
+      AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 2, 1);
       OptLevelOs = false;
     }
 
     if (OptLevelOz && OptLevelOz.getPosition() < PassList.getPosition(i)) {
-      AddOptimizationPasses(Passes, *FPasses, 2, 2);
+      AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 2, 2);
       OptLevelOz = false;
     }
 
     if (OptLevelO3 && OptLevelO3.getPosition() < PassList.getPosition(i)) {
-      AddOptimizationPasses(Passes, *FPasses, 3, 0);
+      AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 3, 0);
       OptLevelO3 = false;
     }
 
@@ -530,7 +457,7 @@ int main(int argc, char **argv) {
              << PassInf->getPassName() << "\n";
     if (P) {
       PassKind Kind = P->getPassKind();
-      addPass(Passes, P);
+      AddPassToPM(Passes, P, VerifyEach);
 
       if (AnalyzeOnly) {
         switch (Kind) {
@@ -562,29 +489,31 @@ int main(int argc, char **argv) {
 
   // If -std-compile-opts was specified at the end of the pass list, add them.
   if (StandardCompileOpts) {
-    AddStandardCompilePasses(Passes);
+    AddStandardCompilePasses(Passes, StripDebug, DisableOptimizations,
+                             DisableInline);
     StandardCompileOpts = false;
   }
 
   if (StandardLinkOpts) {
-    AddStandardLinkPasses(Passes);
+    AddStandardLinkPasses(Passes, StripDebug, DisableOptimizations,
+                          DisableInline, DisableInternalize);
     StandardLinkOpts = false;
   }
 
   if (OptLevelO1)
-    AddOptimizationPasses(Passes, *FPasses, 1, 0);
+    AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 1, 0);
 
   if (OptLevelO2)
-    AddOptimizationPasses(Passes, *FPasses, 2, 0);
+    AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 2, 0);
 
   if (OptLevelOs)
-    AddOptimizationPasses(Passes, *FPasses, 2, 1);
+    AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 2, 1);
 
   if (OptLevelOz)
-    AddOptimizationPasses(Passes, *FPasses, 2, 2);
+    AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 2, 2);
 
   if (OptLevelO3)
-    AddOptimizationPasses(Passes, *FPasses, 3, 0);
+    AddOptimizationPassesWithCmdlineOpts(Passes, *FPasses, 3, 0);
 
   if (OptLevelO1 || OptLevelO2 || OptLevelOs || OptLevelOz || OptLevelO3) {
     FPasses->doInitialization();

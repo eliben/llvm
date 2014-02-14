@@ -29,5 +29,6 @@ add_llvm_tool(opt
   PassPrinters.cpp
   PrintSCC.cpp
   opt.cpp
+  OptUtils.cpp
   )
 set_target_properties(opt PROPERTIES ENABLE_EXPORTS 1)
