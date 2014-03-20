@@ -48,9 +48,9 @@ entry:
 
 ; CHECK: add.u64 %rl[[SP_REG:[0-9]+]], %SP, 0
 ; CHECK:        .param .b64 param0;
-; CHECK-NEXT:   st.param.b64  [param0+0], %rl1;
+; CHECK-NEXT:   st.param.b64  [param0+0], %rl[[A_REG]]
 ; CHECK-NEXT:   .param .b64 param1;
-; CHECK-NEXT:   st.param.b64  [param1+0], %rl2;
+; CHECK-NEXT:   st.param.b64  [param1+0], %rl[[SP_REG]]
 ; CHECK-NEXT:   call.uni
 ; CHECK-NEXT:   callee,
 
