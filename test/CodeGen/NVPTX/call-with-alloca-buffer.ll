@@ -51,8 +51,8 @@ entry:
 ; CHECK-NEXT:   st.param.b64  [param0+0], %rl1;
 ; CHECK-NEXT:   .param .b64 param1;
 ; CHECK-NEXT:   st.param.b64  [param1+0], %rl2;
-; CHECK-NEXT:   call.uni 
-; CHECK-NEXT:   callee, 
+; CHECK-NEXT:   call.uni
+; CHECK-NEXT:   callee,
 
   %arraydecay = getelementptr inbounds [16 x i8]* %buf, i64 0, i64 0
   call void @callee(float* %a, i8* %arraydecay) #2
