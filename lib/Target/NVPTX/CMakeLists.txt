@@ -24,6 +24,7 @@ set(NVPTXCodeGen_sources
   NVPTXUtilities.cpp
   NVVMReflect.cpp
   NVPTXGenericToNVVM.cpp
+  NVPTXPrintfToVprintf.cpp
   NVPTXPrologEpilogPass.cpp
   NVPTXMCExpr.cpp
   )

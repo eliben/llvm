@@ -50,6 +50,7 @@ using namespace llvm;
 namespace llvm {
 void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
+void initializeNVPTXPrintfToVprintfPass(PassRegistry&);
 }
 
 extern "C" void LLVMInitializeNVPTXTarget() {
@@ -61,6 +62,7 @@ extern "C" void LLVMInitializeNVPTXTarget() {
   // but it's very NVPTX-specific.
   initializeNVVMReflectPass(*PassRegistry::getPassRegistry());
   initializeGenericToNVVMPass(*PassRegistry::getPassRegistry());
+  initializeNVPTXPrintfToVprintfPass(*PassRegistry::getPassRegistry());
 }
 
 static std::string computeDataLayout(const NVPTXSubtarget &ST) {
@@ -141,6 +143,10 @@ void NVPTXPassConfig::addIRPasses() {
 
   TargetPassConfig::addIRPasses();
   addPass(createGenericToNVVMPass());
+
+  // Add the NVPTXPrintfToVprintf pass. Note: this pass may add allocas to
+  // non-entry block. This will be fixed later by the AllocaHoisting pass.
+  addPass(createNVPTXPrintfToVprintfPass());
 }
 
 bool NVPTXPassConfig::addInstSelector() {
