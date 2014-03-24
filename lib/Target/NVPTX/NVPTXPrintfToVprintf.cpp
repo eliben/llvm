@@ -38,6 +38,7 @@ public:
   virtual bool runOnModule(Module &M);
 
   virtual void getAnalysisUsage(AnalysisUsage &AU) const {}
+
 private:
   /// \brief Finds a valid printf function in the module.
   ///
@@ -45,12 +46,12 @@ private:
   /// our expectation of what printf looks like (this could happen if the module
   /// defines its own version of printf, for example), returns nullptr.
   Function *findPrintfFunction(Module &M);
+
+  void insertVprintfDeclaration(Module &M);
 };
 }
 
 char NVPTXPrintfToVprintf::ID = 0;
-
-
 
 namespace llvm {
 void initializeNVPTXPrintfToVprintfPass(PassRegistry &);
@@ -60,6 +61,42 @@ INITIALIZE_PASS(NVPTXPrintfToVprintf, "printf-to-vprintf",
 
 bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
   errs() << "I runz, yay\n";
+
+  Function *PrintfFunc = findPrintfFunction(M);
+  if (PrintfFunc == nullptr) {
+    return false;
+  }
+
+  insertVprintfDeclaration(M);
+
+  M.dump();
+
+  PrintfFunc->dump();
+
+  const DataLayout *DL = M.getDataLayout();
+
+  // Go over all the uses of printf in the module. The iteration pattern here
+  // (increment the iterator immediately after grabbing the current instruction)
+  // is required to allow this loop to remove the actual uses and still keep
+  // running over all of them properly.
+  for (Value::use_iterator UI = PrintfFunc->use_begin(),
+                           UE = PrintfFunc->use_end();
+       UI != UE;) {
+    CallInst *Call = dyn_cast<CallInst>(UI->getUser());
+    if (!Call) {
+      report_fatal_error("Only 'call' uses of 'printf' are allowed for NVPTX");
+    }
+    UI++;
+
+    Call->dump();
+    errs() << Call->getNumArgOperands() << "\n";
+    for (unsigned I = 0, IE = Call->getNumArgOperands(); I != IE; ++I) {
+      Value *Operand = Call->getArgOperand(I);
+      Operand->dump();
+      errs() << "size: " << DL->getTypeAllocSize(Operand->getType()) << "\n";
+      errs() << "alignment: " << DL->getABITypeAlignment(Operand->getType()) << "\n";
+    }
+  }
 
   return true;
 }
@@ -76,8 +113,7 @@ Function *NVPTXPrintfToVprintf::findPrintfFunction(Module &M) {
   // printf; otherwise, it's an error.
   FunctionType *FT = PrintfFunc->getFunctionType();
 
-  if (FT->getNumParams() == 1 &&
-      FT->isVarArg() &&
+  if (FT->getNumParams() == 1 && FT->isVarArg() &&
       FT->getReturnType() == Type::getInt32Ty(M.getContext()) &&
       FT->getParamType(0) == Type::getInt8PtrTy(M.getContext())) {
     return PrintfFunc;
@@ -85,6 +121,22 @@ Function *NVPTXPrintfToVprintf::findPrintfFunction(Module &M) {
     report_fatal_error("Found printf in module but it has an invalid type");
     return nullptr;
   }
+}
+
+void NVPTXPrintfToVprintf::insertVprintfDeclaration(Module &M) {
+  if (M.getFunction("vprintf") != nullptr) {
+    report_fatal_error("It is illegal to declare vprintf with C linkage");
+  }
+
+  // Create a declaration for vprintf with the proper type and insert it into
+  // the module.
+  Type *ArgTypes[] = {Type::getInt8PtrTy(M.getContext()),
+                      Type::getInt8PtrTy(M.getContext())};
+  FunctionType *VprintfFuncType =
+      FunctionType::get(Type::getInt32Ty(M.getContext()), ArgTypes, false);
+
+  Function::Create(VprintfFuncType, GlobalVariable::ExternalLinkage, "vprintf",
+                   &M);
 }
 
 ModulePass *llvm::createNVPTXPrintfToVprintfPass() {
