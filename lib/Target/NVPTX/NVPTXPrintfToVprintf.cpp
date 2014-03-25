@@ -1,4 +1,4 @@
-//===-- NVPTXPrintfToVprintf.cpp - Convert prinfc calls to vprintf --------===//
+//===-- NVPTXPrintfToVprintf.cpp - Convert printf calls to vprintf --------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -17,6 +17,11 @@
 //   object buf[] = {obj1, obj2, obj3};
 //   vprintf("format string", buf);
 //
+// The objects are laid out sequentially, respecting the preferred alignment
+// for each type. Note also that by the time this pass runs, the arguments have
+// already undergone the standard C vararg type promotion (char to int, float to
+// double, etc.)
+//
 //===----------------------------------------------------------------------===//
 
 #include "NVPTX.h"
@@ -33,12 +38,9 @@ namespace {
 class NVPTXPrintfToVprintf : public ModulePass {
 public:
   static char ID;
-
   NVPTXPrintfToVprintf() : ModulePass(ID) {}
 
   virtual bool runOnModule(Module &M);
-
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const {}
 
 private:
   /// \brief Finds a valid printf function in the module.
@@ -48,6 +50,10 @@ private:
   /// defines its own version of printf, for example), returns nullptr.
   Function *findPrintfFunction(Module &M);
 
+  /// \brief Inserts a declaration for vprintf into the module.
+  ///
+  /// The created Function is empty (a declaration); a pointer to it is
+  /// returned.
   Function *insertVprintfDeclaration(Module &M);
 };
 }
@@ -61,19 +67,12 @@ INITIALIZE_PASS(NVPTXPrintfToVprintf, "printf-to-vprintf",
                 "Convert printf calls to the vprintf syscall", false, false)
 
 bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
-  errs() << "I runz, yay\n";
-
   Function *PrintfFunc = findPrintfFunction(M);
   if (PrintfFunc == nullptr) {
     return false;
   }
 
   Function *VprintfFunc = insertVprintfDeclaration(M);
-
-  M.dump();
-
-  PrintfFunc->dump();
-
   const DataLayout *DL = M.getDataLayout();
 
   // Go over all the uses of printf in the module. The iteration pattern here
@@ -89,40 +88,52 @@ bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
     }
     UI++;
 
-    errs() << Call->getNumArgOperands() << "\n";
     // First compute the buffer size required to hold all the formatting
     // arguments, and create the buffer with an alloca.
-    // TODO: what happens if no formatting args?
     unsigned Bufsize = 0;
     for (unsigned I = 1, IE = Call->getNumArgOperands(); I < IE; ++I) {
+      Value *Operand = Call->getArgOperand(I);
+      Bufsize = DL->RoundUpAlignment(
+          Bufsize, DL->getPrefTypeAlignment(Operand->getType()));
       Bufsize += DL->getTypeAllocSize(Call->getArgOperand(I)->getType());
     }
 
     Type *Int32Ty = Type::getInt32Ty(M.getContext());
-    Value *BufferPtr;
+    Value *BufferPtr = nullptr;
 
     if (Bufsize == 0) {
+      // If no arguments, pass a null pointer as the second argument to vprintf.
       BufferPtr = ConstantInt::get(Int32Ty, 0);
     } else {
+      // Create the buffer to hold all the arguments.
       BufferPtr = new AllocaInst(Type::getInt8Ty(M.getContext()),
                                  ConstantInt::get(Int32Ty, Bufsize),
                                  "buf_for_vprintf_args", Call);
 
+      // Each argument is placed into the buffer as follows:
+      // 1. GEP is used to compute an offset into the buffer
+      // 2. Bitcast to convert the buffer pointer to the correct type
+      // 3. Store into that location
       unsigned Offset = 0;
       for (unsigned I = 1, IE = Call->getNumArgOperands(); I < IE; ++I) {
+        Value *Operand = Call->getArgOperand(I);
+        Offset = DL->RoundUpAlignment(
+            Offset, DL->getPrefTypeAlignment(Operand->getType()));
+
         Value *GEPIndex[] = {ConstantInt::get(Int32Ty, Offset)};
         GetElementPtrInst *GEP =
             GetElementPtrInst::Create(BufferPtr, GEPIndex, "", Call);
 
-        Value *Operand = Call->getArgOperand(I);
         BitCastInst *Cast =
             new BitCastInst(GEP, Operand->getType()->getPointerTo(), "", Call);
-        new StoreInst(Operand, Cast, false, 1, Call);
+        new StoreInst(Operand, Cast, false,
+                      DL->getPrefTypeAlignment(Operand->getType()), Call);
 
         Offset += DL->getTypeAllocSize(Operand->getType());
       }
     }
 
+    // Generate the alternative call to vprintf and replace the original.
     Value *VprintfArgs[] = {Call->getArgOperand(0), BufferPtr};
     CallInst *VprintfCall =
         CallInst::Create(VprintfFunc, VprintfArgs, "", Call);
@@ -131,7 +142,6 @@ bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
     Call->eraseFromParent();
   }
 
-  M.dump();
   return true;
 }
 
