@@ -282,6 +282,21 @@ PPCInstrInfo::commuteInstruction(MachineInstr *MI, bool NewMI) const {
   return MI;
 }
 
+bool PPCInstrInfo::findCommutedOpIndices(MachineInstr *MI, unsigned &SrcOpIdx1,
+                                         unsigned &SrcOpIdx2) const {
+  // For VSX A-Type FMA instructions, it is the first two operands that can be
+  // commuted, however, because the non-encoded tied input operand is listed
+  // first, the operands to swap are actually the second and third.
+
+  int AltOpc = PPC::getAltVSXFMAOpcode(MI->getOpcode());
+  if (AltOpc == -1)
+    return TargetInstrInfo::findCommutedOpIndices(MI, SrcOpIdx1, SrcOpIdx2);
+
+  SrcOpIdx1 = 2;
+  SrcOpIdx2 = 3;
+  return true;
+}
+
 void PPCInstrInfo::insertNoop(MachineBasicBlock &MBB,
                               MachineBasicBlock::iterator MI) const {
   // This function is used for scheduling, and the nop wanted here is the type
@@ -710,12 +725,14 @@ void PPCInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
   else if (PPC::VRRCRegClass.contains(DestReg, SrcReg))
     Opc = PPC::VOR;
   else if (PPC::VSRCRegClass.contains(DestReg, SrcReg))
-    // FIXME: There are really two different ways this can be done, and we
-    // should pick the better one depending on the situation:
+    // There are two different ways this can be done:
     //   1. xxlor : This has lower latency (on the P7), 2 cycles, but can only
     //      issue in VSU pipeline 0.
     //   2. xmovdp/xmovsp: This has higher latency (on the P7), 6 cycles, but
     //      can go to either pipeline.
+    // We'll always use xxlor here, because in practically all cases where
+    // copies are generated, they are close enough to some use that the
+    // lower-latency form is preferable.
     Opc = PPC::XXLOR;
   else if (PPC::CRBITRCRegClass.contains(DestReg, SrcReg))
     Opc = PPC::CROR;

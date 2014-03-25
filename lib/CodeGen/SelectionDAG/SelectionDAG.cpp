@@ -2541,11 +2541,13 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL,
     switch (Opcode) {
     default: break;
     case ISD::SIGN_EXTEND:
-      return getConstant(Val.sextOrTrunc(VT.getSizeInBits()), VT);
+      return getConstant(Val.sextOrTrunc(VT.getSizeInBits()), VT,
+                         C->isTargetOpcode(), C->isOpaque());
     case ISD::ANY_EXTEND:
     case ISD::ZERO_EXTEND:
     case ISD::TRUNCATE:
-      return getConstant(Val.zextOrTrunc(VT.getSizeInBits()), VT);
+      return getConstant(Val.zextOrTrunc(VT.getSizeInBits()), VT,
+                         C->isTargetOpcode(), C->isOpaque());
     case ISD::UINT_TO_FP:
     case ISD::SINT_TO_FP: {
       APFloat apf(EVTToAPFloatSemantics(VT),
@@ -2562,15 +2564,19 @@ SDValue SelectionDAG::getNode(unsigned Opcode, SDLoc DL,
         return getConstantFP(APFloat(APFloat::IEEEdouble, Val), VT);
       break;
     case ISD::BSWAP:
-      return getConstant(Val.byteSwap(), VT);
+      return getConstant(Val.byteSwap(), VT, C->isTargetOpcode(),
+                         C->isOpaque());
     case ISD::CTPOP:
-      return getConstant(Val.countPopulation(), VT);
+      return getConstant(Val.countPopulation(), VT, C->isTargetOpcode(),
+                         C->isOpaque());
     case ISD::CTLZ:
     case ISD::CTLZ_ZERO_UNDEF:
-      return getConstant(Val.countLeadingZeros(), VT);
+      return getConstant(Val.countLeadingZeros(), VT, C->isTargetOpcode(),
+                         C->isOpaque());
     case ISD::CTTZ:
     case ISD::CTTZ_ZERO_UNDEF:
-      return getConstant(Val.countTrailingZeros(), VT);
+      return getConstant(Val.countTrailingZeros(), VT, C->isTargetOpcode(),
+                         C->isOpaque());
     }
   }
 
@@ -6573,15 +6579,14 @@ bool BuildVectorSDNode::isConstantSplat(APInt &SplatValue,
   return true;
 }
 
-ConstantSDNode *BuildVectorSDNode::isConstantSplat() const {
+ConstantSDNode *BuildVectorSDNode::getConstantSplatValue() const {
   SDValue Op0 = getOperand(0);
-  for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
-    SDValue Opi = getOperand(i);
-    unsigned Opc = Opi.getOpcode();
-    if ((Opc != ISD::UNDEF && Opc != ISD::Constant && Opc != ISD::ConstantFP) ||
-        Opi != Op0)
+  if (Op0.getOpcode() != ISD::Constant)
+    return nullptr;
+
+  for (unsigned i = 1, e = getNumOperands(); i != e; ++i)
+    if (getOperand(i) != Op0)
       return nullptr;
-  }
 
   return cast<ConstantSDNode>(Op0);
 }

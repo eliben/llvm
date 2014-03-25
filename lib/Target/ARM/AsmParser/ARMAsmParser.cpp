@@ -13,8 +13,6 @@
 #include "MCTargetDesc/ARMArchName.h"
 #include "MCTargetDesc/ARMBaseInfo.h"
 #include "MCTargetDesc/ARMMCExpr.h"
-#include "llvm/ADT/BitVector.h"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/OwningPtr.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -25,7 +23,9 @@
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler.h"
+#include "llvm/MC/MCELF.h"
 #include "llvm/MC/MCELFStreamer.h"
+#include "llvm/MC/MCELFSymbolFlags.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
 #include "llvm/MC/MCInstrDesc.h"
@@ -8085,6 +8085,7 @@ bool ARMAsmParser::parseDirectiveThumb(SMLoc L) {
 
   if (!isThumb())
     SwitchMode();
+
   getParser().getStreamer().EmitAssemblerFlag(MCAF_Code16);
   return false;
 }
@@ -8105,6 +8106,7 @@ bool ARMAsmParser::parseDirectiveARM(SMLoc L) {
 
   if (isThumb())
     SwitchMode();
+
   getParser().getStreamer().EmitAssemblerFlag(MCAF_Code32);
   return false;
 }
@@ -8113,6 +8115,32 @@ void ARMAsmParser::onLabelParsed(MCSymbol *Symbol) {
   if (NextSymbolIsThumb) {
     getParser().getStreamer().EmitThumbFunc(Symbol);
     NextSymbolIsThumb = false;
+    return;
+  }
+
+  if (!isThumb())
+    return;
+
+  const MCObjectFileInfo::Environment Format =
+    getContext().getObjectFileInfo()->getObjectFileType();
+  switch (Format) {
+  case MCObjectFileInfo::IsCOFF: {
+    const MCSymbolData &SD =
+      getParser().getStreamer().getOrCreateSymbolData(Symbol);
+    char Type = COFF::IMAGE_SYM_DTYPE_FUNCTION << COFF::SCT_COMPLEX_TYPE_SHIFT;
+    if (SD.getFlags() & (Type << COFF::SF_TypeShift))
+      getParser().getStreamer().EmitThumbFunc(Symbol);
+    break;
+  }
+  case MCObjectFileInfo::IsELF: {
+    const MCSymbolData &SD =
+      getParser().getStreamer().getOrCreateSymbolData(Symbol);
+    if (MCELF::GetType(SD) & (ELF::STT_FUNC << ELF_STT_Shift))
+      getParser().getStreamer().EmitThumbFunc(Symbol);
+    break;
+  }
+  case MCObjectFileInfo::IsMachO:
+    break;
   }
 }
 
@@ -8269,6 +8297,14 @@ bool ARMAsmParser::parseDirectiveUnreq(SMLoc L) {
 /// parseDirectiveArch
 ///  ::= .arch token
 bool ARMAsmParser::parseDirectiveArch(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".arch directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   StringRef Arch = getParser().parseStringToEndOfStatement().trim();
 
   unsigned ID = StringSwitch<unsigned>(Arch)
@@ -8292,9 +8328,16 @@ bool ARMAsmParser::parseDirectiveArch(SMLoc L) {
 ///  ::= .eabi_attribute int, int [, "str"]
 ///  ::= .eabi_attribute Tag_name, int [, "str"]
 bool ARMAsmParser::parseDirectiveEabiAttr(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".eabi_attribute directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   int64_t Tag;
   SMLoc TagLoc;
-
   TagLoc = Parser.getTok().getLoc();
   if (Parser.getTok().is(AsmToken::Identifier)) {
     StringRef Name = Parser.getTok().getIdentifier();
@@ -8398,6 +8441,14 @@ bool ARMAsmParser::parseDirectiveEabiAttr(SMLoc L) {
 /// parseDirectiveCPU
 ///  ::= .cpu str
 bool ARMAsmParser::parseDirectiveCPU(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".cpu directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   StringRef CPU = getParser().parseStringToEndOfStatement().trim();
   getTargetStreamer().emitTextAttribute(ARMBuildAttrs::CPU_name, CPU);
   return false;
@@ -8406,6 +8457,14 @@ bool ARMAsmParser::parseDirectiveCPU(SMLoc L) {
 /// parseDirectiveFPU
 ///  ::= .fpu str
 bool ARMAsmParser::parseDirectiveFPU(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".fpu directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   StringRef FPU = getParser().parseStringToEndOfStatement().trim();
 
   unsigned ID = StringSwitch<unsigned>(FPU)
@@ -8425,6 +8484,14 @@ bool ARMAsmParser::parseDirectiveFPU(SMLoc L) {
 /// parseDirectiveFnStart
 ///  ::= .fnstart
 bool ARMAsmParser::parseDirectiveFnStart(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".fnstart directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   if (UC.hasFnStart()) {
     Error(L, ".fnstart starts before the end of previous one");
     UC.emitFnStartLocNotes();
@@ -8704,6 +8771,14 @@ bool ARMAsmParser::parseDirectiveRegSave(SMLoc L, bool IsVector) {
 ///  ::= .inst.n opcode [, ...]
 ///  ::= .inst.w opcode [, ...]
 bool ARMAsmParser::parseDirectiveInst(SMLoc Loc, char Suffix) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(Loc, ".inst directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   int Width;
 
   if (isThumb()) {
@@ -8952,6 +9027,14 @@ bool ARMAsmParser::parseDirectiveUnwindRaw(SMLoc L) {
 /// parseDirectiveTLSDescSeq
 ///   ::= .tlsdescseq tls-variable
 bool ARMAsmParser::parseDirectiveTLSDescSeq(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".tlsdescseq directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   if (getLexer().isNot(AsmToken::Identifier)) {
     TokError("expected variable after '.tlsdescseq' directive");
     Parser.eatToEndOfStatement();
@@ -9039,6 +9122,14 @@ bool ARMAsmParser::parseDirectiveMovSP(SMLoc L) {
 /// parseDirectiveObjectArch
 ///   ::= .object_arch name
 bool ARMAsmParser::parseDirectiveObjectArch(SMLoc L) {
+  const MCAsmInfo *MAI = getParser().getStreamer().getContext().getAsmInfo();
+  bool isMachO = MAI->hasSubsectionsViaSymbols();
+  if (isMachO) {
+    Error(L, ".object_arch directive not valid for Mach-O");
+    Parser.eatToEndOfStatement();
+    return false;
+  }
+
   if (getLexer().isNot(AsmToken::Identifier)) {
     Error(getLexer().getLoc(), "unexpected token");
     Parser.eatToEndOfStatement();

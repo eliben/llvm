@@ -250,6 +250,13 @@ struct coff_section {
   support::ulittle16_t NumberOfRelocations;
   support::ulittle16_t NumberOfLinenumbers;
   support::ulittle32_t Characteristics;
+
+  // Returns true if the actual number of relocations is stored in
+  // VirtualAddress field of the first relocation table entry.
+  bool hasExtendedRelocations() const {
+    return Characteristics & COFF::IMAGE_SCN_LNK_NRELOC_OVFL &&
+        NumberOfRelocations == UINT16_MAX;
+  };
 };
 
 struct coff_relocation {
@@ -383,6 +390,7 @@ protected:
                                    bool &Result) const override;
   relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
+  bool section_rel_empty(DataRefImpl Sec) const override;
 
   void moveRelocationNext(DataRefImpl &Rel) const override;
   error_code getRelocationAddress(DataRefImpl Rel,

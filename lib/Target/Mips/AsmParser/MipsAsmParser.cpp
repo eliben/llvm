@@ -16,6 +16,7 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCParser/MCAsmLexer.h"
 #include "llvm/MC/MCParser/MCParsedAsmOperand.h"
 #include "llvm/MC/MCStreamer.h"
@@ -248,6 +249,9 @@ class MipsAsmParser : public MCTargetAsmParser {
   unsigned getReg(int RC, int RegNo);
 
   int getATReg();
+
+  // Warn if RegNo is the current assembler temporary.
+  void warnIfAssemblerTemporary(int RegNo);
 
   bool processInstruction(MCInst &Inst, SMLoc IDLoc,
                           SmallVectorImpl<MCInst> &Instructions);
@@ -589,6 +593,7 @@ static const MCInstrDesc &getInstDesc(unsigned Opcode) {
 bool MipsAsmParser::processInstruction(MCInst &Inst, SMLoc IDLoc,
                                        SmallVectorImpl<MCInst> &Instructions) {
   const MCInstrDesc &MCID = getInstDesc(Inst.getOpcode());
+
   Inst.setLoc(IDLoc);
 
   if (MCID.isBranch() || MCID.isCall()) {
@@ -690,6 +695,10 @@ bool MipsAsmParser::needsExpansion(MCInst &Inst) {
   case Mips::LoadImm32Reg:
   case Mips::LoadAddr32Imm:
   case Mips::LoadAddr32Reg:
+  case Mips::SUBi:
+  case Mips::SUBiu:
+  case Mips::DSUBi:
+  case Mips::DSUBiu:
     return true;
   default:
     return false;
@@ -705,6 +714,30 @@ void MipsAsmParser::expandInstruction(MCInst &Inst, SMLoc IDLoc,
     return expandLoadAddressImm(Inst, IDLoc, Instructions);
   case Mips::LoadAddr32Reg:
     return expandLoadAddressReg(Inst, IDLoc, Instructions);
+  case Mips::SUBi:
+    Instructions.push_back(MCInstBuilder(Mips::ADDi)
+                               .addReg(Inst.getOperand(0).getReg())
+                               .addReg(Inst.getOperand(1).getReg())
+                               .addImm(-Inst.getOperand(2).getImm()));
+    return;
+  case Mips::SUBiu:
+    Instructions.push_back(MCInstBuilder(Mips::ADDiu)
+                               .addReg(Inst.getOperand(0).getReg())
+                               .addReg(Inst.getOperand(1).getReg())
+                               .addImm(-Inst.getOperand(2).getImm()));
+    return;
+  case Mips::DSUBi:
+    Instructions.push_back(MCInstBuilder(Mips::DADDi)
+                               .addReg(Inst.getOperand(0).getReg())
+                               .addReg(Inst.getOperand(1).getReg())
+                               .addImm(-Inst.getOperand(2).getImm()));
+    return;
+  case Mips::DSUBiu:
+    Instructions.push_back(MCInstBuilder(Mips::DADDiu)
+                               .addReg(Inst.getOperand(0).getReg())
+                               .addReg(Inst.getOperand(1).getReg())
+                               .addImm(-Inst.getOperand(2).getImm()));
+    return;
   }
 }
 
@@ -952,14 +985,23 @@ bool MipsAsmParser::MatchAndEmitInstruction(
   return true;
 }
 
+void MipsAsmParser::warnIfAssemblerTemporary(int RegNo) {
+  if ((RegNo != 0) && ((int)Options.getATRegNum() == RegNo)) {
+    if (RegNo == 1)
+      Warning(getLexer().getLoc(), "Used $at without \".set noat\"");
+    else
+      Warning(getLexer().getLoc(), Twine("Used $") + Twine(RegNo) +
+                                       " with \".set at=$" + Twine(RegNo) +
+                                       "\"");
+  }
+}
+
 int MipsAsmParser::matchCPURegisterName(StringRef Name) {
   int CC;
 
-  if (Name == "at")
-    return getATReg();
-
   CC = StringSwitch<unsigned>(Name)
            .Case("zero", 0)
+           .Case("at", 1)
            .Case("a0", 4)
            .Case("a1", 5)
            .Case("a2", 6)
@@ -1008,6 +1050,8 @@ int MipsAsmParser::matchCPURegisterName(StringRef Name) {
              .Case("kt1", 27)
              .Case("s8", 30)
              .Default(-1);
+
+  warnIfAssemblerTemporary(CC);
 
   return CC;
 }
@@ -1144,7 +1188,12 @@ bool MipsAssemblerOptions::setATReg(unsigned Reg) {
   return true;
 }
 
-int MipsAsmParser::getATReg() { return Options.getATRegNum(); }
+int MipsAsmParser::getATReg() {
+  int AT = Options.getATRegNum();
+  if (AT == 0)
+    TokError("Pseudo instruction requires $at, which is not available");
+  return AT;
+}
 
 unsigned MipsAsmParser::getReg(int RC, int RegNo) {
   return *(getContext().getRegisterInfo()->getRegClass(RC).begin() + RegNo);
@@ -1154,6 +1203,9 @@ int MipsAsmParser::matchRegisterByNumber(unsigned RegNum, unsigned RegClass) {
   if (RegNum >
       getContext().getRegisterInfo()->getRegClass(RegClass).getNumRegs())
     return -1;
+
+  if (RegClass == Mips::GPR32RegClassID || RegClass == Mips::GPR64RegClassID)
+    warnIfAssemblerTemporary(RegNum);
 
   return getReg(RegClass, RegNum);
 }
@@ -2300,7 +2352,7 @@ bool MipsAsmParser::parseSetAtDirective() {
       return false;
     }
 
-    if (AtRegNo < 1 || AtRegNo > 31) {
+    if (AtRegNo < 0 || AtRegNo > 31) {
       reportParseError("unexpected token in statement");
       return false;
     }

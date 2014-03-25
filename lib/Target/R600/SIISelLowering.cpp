@@ -25,8 +25,6 @@
 #include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/IR/Function.h"
 
-const uint64_t RSRC_DATA_FORMAT = 0xf00000000000LL;
-
 using namespace llvm;
 
 SITargetLowering::SITargetLowering(TargetMachine &TM) :
@@ -106,6 +104,8 @@ SITargetLowering::SITargetLowering(TargetMachine &TM) :
   setOperationAction(ISD::STORE, MVT::v4i32, Custom);
 
   setOperationAction(ISD::SELECT, MVT::i64, Custom);
+  setOperationAction(ISD::SELECT, MVT::f64, Promote);
+  AddPromotedToType(ISD::SELECT, MVT::f64, MVT::i64);
 
   setOperationAction(ISD::SELECT_CC, MVT::f32, Custom);
   setOperationAction(ISD::SELECT_CC, MVT::i32, Custom);
@@ -398,16 +398,16 @@ MachineBasicBlock * SITargetLowering::EmitInstrWithCustomInserter(
       static_cast<const SIInstrInfo*>(getTargetMachine().getInstrInfo());
     MachineRegisterInfo &MRI = BB->getParent()->getRegInfo();
     unsigned SuperReg = MI->getOperand(0).getReg();
-    unsigned SubRegLo = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
-    unsigned SubRegHi = MRI.createVirtualRegister(&AMDGPU::SReg_64RegClass);
-    unsigned SubRegHiHi = MRI.createVirtualRegister(&AMDGPU::SReg_32RegClass);
-    unsigned SubRegHiLo = MRI.createVirtualRegister(&AMDGPU::SReg_32RegClass);
+    unsigned SubRegLo = MRI.createVirtualRegister(&AMDGPU::SGPR_64RegClass);
+    unsigned SubRegHi = MRI.createVirtualRegister(&AMDGPU::SGPR_64RegClass);
+    unsigned SubRegHiHi = MRI.createVirtualRegister(&AMDGPU::SGPR_32RegClass);
+    unsigned SubRegHiLo = MRI.createVirtualRegister(&AMDGPU::SGPR_32RegClass);
     BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::S_MOV_B64), SubRegLo)
             .addOperand(MI->getOperand(1));
     BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::S_MOV_B32), SubRegHiLo)
             .addImm(0);
     BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::S_MOV_B32), SubRegHiHi)
-            .addImm(RSRC_DATA_FORMAT >> 32);
+            .addImm(AMDGPU::RSRC_DATA_FORMAT >> 32);
     BuildMI(*BB, I, MI->getDebugLoc(), TII->get(AMDGPU::REG_SEQUENCE), SubRegHi)
             .addReg(SubRegHiLo)
             .addImm(AMDGPU::sub0)
@@ -739,12 +739,28 @@ SDValue SITargetLowering::LowerLOAD(SDValue Op, SelectionDAG &DAG) const {
     return SDValue();
   }
 
+  EVT MemVT = Load->getMemoryVT();
+
+  assert(!MemVT.isVector() && "Private loads should be scalarized");
+  assert(!MemVT.isFloatingPoint() && "FP loads should be promoted to int");
+
   SDValue Ptr = DAG.getNode(ISD::SRL, DL, MVT::i32, Load->getBasePtr(),
                             DAG.getConstant(2, MVT::i32));
-  Ret = DAG.getNode(AMDGPUISD::REGISTER_LOAD, DL, Op.getValueType(),
+  Ret = DAG.getNode(AMDGPUISD::REGISTER_LOAD, DL, MVT::i32,
                     Load->getChain(), Ptr,
                     DAG.getTargetConstant(0, MVT::i32),
                     Op.getOperand(2));
+  if (MemVT.getSizeInBits() == 64) {
+    SDValue IncPtr = DAG.getNode(ISD::ADD, DL, MVT::i32, Ptr,
+                                 DAG.getConstant(1, MVT::i32));
+
+    SDValue LoadUpper = DAG.getNode(AMDGPUISD::REGISTER_LOAD, DL, MVT::i32,
+                                    Load->getChain(), IncPtr,
+                                    DAG.getTargetConstant(0, MVT::i32),
+                                    Op.getOperand(2));
+
+    Ret = DAG.getNode(ISD::BUILD_PAIR, DL, MVT::i64, Ret, LoadUpper);
+  }
 
   MergedValues[0] = Ret;
   return DAG.getMergeValues(MergedValues, 2, DL);
