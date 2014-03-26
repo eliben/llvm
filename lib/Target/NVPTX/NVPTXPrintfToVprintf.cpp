@@ -63,7 +63,7 @@ char NVPTXPrintfToVprintf::ID = 0;
 namespace llvm {
 void initializeNVPTXPrintfToVprintfPass(PassRegistry &);
 }
-INITIALIZE_PASS(NVPTXPrintfToVprintf, "printf-to-vprintf",
+INITIALIZE_PASS(NVPTXPrintfToVprintf, "nvptx-printf-to-vprintf",
                 "Convert printf calls to the vprintf syscall", false, false)
 
 bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
@@ -90,24 +90,31 @@ bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
 
     // First compute the buffer size required to hold all the formatting
     // arguments, and create the buffer with an alloca.
-    unsigned Bufsize = 0;
+    // Note: the first argument is the formatting string - its validity is
+    // verified by the frontend.
+    unsigned BufSize = 0;
     for (unsigned I = 1, IE = Call->getNumArgOperands(); I < IE; ++I) {
       Value *Operand = Call->getArgOperand(I);
-      Bufsize = DL->RoundUpAlignment(
-          Bufsize, DL->getPrefTypeAlignment(Operand->getType()));
-      Bufsize += DL->getTypeAllocSize(Call->getArgOperand(I)->getType());
+      BufSize = DL->RoundUpAlignment(
+          BufSize, DL->getPrefTypeAlignment(Operand->getType()));
+      BufSize += DL->getTypeAllocSize(Call->getArgOperand(I)->getType());
     }
 
     Type *Int32Ty = Type::getInt32Ty(M.getContext());
     Value *BufferPtr = nullptr;
 
-    if (Bufsize == 0) {
+    if (BufSize == 0) {
       // If no arguments, pass a null pointer as the second argument to vprintf.
       BufferPtr = ConstantInt::get(Int32Ty, 0);
     } else {
-      // Create the buffer to hold all the arguments.
+      // Create the buffer to hold all the arguments. Align it to the preferred
+      // alignment of the first object going into the buffer. Note: if BufSize >
+      // 0, we know there's at least one object so getArgOperand(1) is safe.
+      unsigned AlignOfFirst =
+          DL->getPrefTypeAlignment(Call->getArgOperand(1)->getType());
       BufferPtr = new AllocaInst(Type::getInt8Ty(M.getContext()),
-                                 ConstantInt::get(Int32Ty, Bufsize),
+                                 ConstantInt::get(Int32Ty, BufSize),
+                                 AlignOfFirst,
                                  "buf_for_vprintf_args", Call);
 
       // Each argument is placed into the buffer as follows:
@@ -120,9 +127,8 @@ bool NVPTXPrintfToVprintf::runOnModule(Module &M) {
         Offset = DL->RoundUpAlignment(
             Offset, DL->getPrefTypeAlignment(Operand->getType()));
 
-        Value *GEPIndex[] = {ConstantInt::get(Int32Ty, Offset)};
-        GetElementPtrInst *GEP =
-            GetElementPtrInst::Create(BufferPtr, GEPIndex, "", Call);
+        GetElementPtrInst *GEP = GetElementPtrInst::Create(
+            BufferPtr, ConstantInt::get(Int32Ty, Offset), "", Call);
 
         BitCastInst *Cast =
             new BitCastInst(GEP, Operand->getType()->getPointerTo(), "", Call);
